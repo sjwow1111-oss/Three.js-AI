@@ -1,8 +1,8 @@
 /**
- * AI 플랫폼 어댑터.
- * OpenAI 호환(/chat/completions)과 Anthropic 호환(/messages) 두 규격을 지원한다.
- * 어느 쪽이든 아래 공통 메시지 형태를 입력으로 받는다.
- *   { role:'user'|'assistant', text:string, images?:[{mime,data}] }   // data = base64(prefix 제외)
+ * Adapters for AI platforms.
+ * Supports both the OpenAI-compatible (/chat/completions) and Anthropic-compatible
+ * (/messages) shapes. Either way, messages come in this common form:
+ *   { role:'user'|'assistant', text:string, images?:[{mime,data}] }   // data = base64 without the prefix
  */
 
 export const PRESETS = [
@@ -13,12 +13,12 @@ export const PRESETS = [
   { id:'together',   label:'Together',     protocol:'openai',    endpoint:'https://api.together.xyz/v1',      model:'' },
   { id:'deepseek',   label:'DeepSeek',     protocol:'openai',    endpoint:'https://api.deepseek.com/v1',      model:'deepseek-chat' },
   { id:'mistral',    label:'Mistral',      protocol:'openai',    endpoint:'https://api.mistral.ai/v1',        model:'' },
-  { id:'ollama',     label:'Ollama (로컬)', protocol:'openai',   endpoint:'http://localhost:11434/v1',        model:'' },
+  { id:'ollama',     label:'Ollama (local)', protocol:'openai',   endpoint:'http://localhost:11434/v1',        model:'' },
   { id:'lmstudio',   label:'LM Studio',    protocol:'openai',    endpoint:'http://localhost:1234/v1',         model:'' },
-  { id:'custom',     label:'직접 입력',     protocol:'openai',    endpoint:'',                                 model:'' },
+  { id:'custom',     label:'Custom',        protocol:'openai',    endpoint:'',                                 model:'' },
 ];
 
-/** Base URL 정규화: 끝 슬래시·엔드포인트 경로 제거, 경로가 없으면 /v1 보정 */
+/** Normalize a base URL: drop trailing slashes and endpoint paths, default to /v1 when no path is given */
 export function normalizeBase(raw) {
   let u = String(raw || '').trim();
   if (!u) return '';
@@ -28,7 +28,7 @@ export function normalizeBase(raw) {
   try {
     const url = new URL(u);
     if (url.pathname === '' || url.pathname === '/') u = url.origin + '/v1';
-  } catch { /* 그대로 사용 */ }
+  } catch { /* keep as typed */ }
   return u.replace(/\/+$/, '');
 }
 
@@ -37,7 +37,7 @@ function headersFor(cfg) {
   if (cfg.protocol === 'anthropic') {
     if (cfg.apiKey) h['x-api-key'] = cfg.apiKey;
     h['anthropic-version'] = '2023-06-01';
-    // 브라우저에서 직접 호출하려면 필요한 헤더 (Anthropic 공식 API 기준)
+    // required to call the official Anthropic API straight from a browser
     h['anthropic-dangerous-direct-browser-access'] = 'true';
   } else if (cfg.apiKey) {
     h['authorization'] = 'Bearer ' + cfg.apiKey;
@@ -60,10 +60,10 @@ async function readError(res) {
     } catch { detail = txt; }
   } catch { /* ignore */ }
   detail = String(detail || '').slice(0, 600);
-  return new Error(`요청 실패 (HTTP ${res.status})${detail ? ': ' + detail : ''}`);
+  return new Error(`Request failed (HTTP ${res.status})${detail ? ': ' + detail : ''}`);
 }
 
-/* ── 모델 목록 ───────────────────────────────────────── */
+/* ── model listing ─────────────────────────────────── */
 export async function listModels(cfg) {
   const res = await fetch(requestUrl(cfg, '/models'), { headers: headersFor(cfg) });
   if (!res.ok) throw await readError(res);
@@ -75,7 +75,7 @@ export async function listModels(cfg) {
   return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
 }
 
-/* ── 메시지 변환 ─────────────────────────────────────── */
+/* ── message conversion ────────────────────────────── */
 function toOpenAIMessages(system, messages) {
   const out = [{ role: 'system', content: system }];
   for (const m of messages) {
@@ -102,7 +102,7 @@ function toAnthropicMessages(messages) {
   });
 }
 
-/* ── SSE 스트림 파서 ─────────────────────────────────── */
+/* ── SSE stream parser ─────────────────────────────── */
 async function* sseLines(res) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -126,7 +126,7 @@ async function* sseLines(res) {
 }
 
 /**
- * 스트리밍 채팅. onDelta(textChunk)로 조각을 흘려보내고, 최종 전체 텍스트를 반환한다.
+ * Streaming chat. Pushes chunks through onDelta(textChunk) and returns the full text.
  */
 export async function streamChat(cfg, { system, messages, signal, onDelta }) {
   const isAnthropic = cfg.protocol === 'anthropic';
@@ -145,7 +145,7 @@ export async function streamChat(cfg, { system, messages, signal, onDelta }) {
     signal,
   });
   if (!res.ok) throw await readError(res);
-  if (!res.body) throw new Error('스트리밍 응답을 읽을 수 없습니다.');
+  if (!res.body) throw new Error('Could not read the streaming response.');
 
   let full = '';
   for await (const data of sseLines(res)) {
@@ -157,7 +157,7 @@ export async function streamChat(cfg, { system, messages, signal, onDelta }) {
       if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
         full += evt.delta.text; onDelta?.(evt.delta.text);
       } else if (evt.type === 'error') {
-        throw new Error(evt.error?.message || 'Anthropic 스트림 오류');
+        throw new Error(evt.error?.message || 'Anthropic stream error');
       }
     } else {
       const d = evt.choices?.[0]?.delta;
@@ -166,14 +166,14 @@ export async function streamChat(cfg, { system, messages, signal, onDelta }) {
       else if (Array.isArray(piece)) {
         for (const p of piece) if (p?.text) { full += p.text; onDelta?.(p.text); }
       }
-      if (evt.error) throw new Error(evt.error.message || 'API 스트림 오류');
+      if (evt.error) throw new Error(evt.error.message || 'API stream error');
     }
   }
-  if (!full.trim()) throw new Error('모델이 빈 응답을 반환했습니다. 다른 모델을 선택해 보세요.');
+  if (!full.trim()) throw new Error('The model returned an empty response. Try a different model.');
   return full;
 }
 
-/** 연결 확인용 최소 호출 */
+/** Minimal call used by the connection test */
 export async function testConnection(cfg) {
   const text = await streamChat(cfg, {
     system: 'You are a connectivity probe. Reply with exactly: OK',

@@ -1,65 +1,65 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Three.js AI Studio — 프롬프트로 만드는 3D 모델</title>
-<meta name="description" content="OpenAI / Anthropic 호환 엔드포인트를 연결해 프롬프트와 사진으로 Three.js 3D 모델을 생성하고 바로 감상하는 스튜디오" />
+<title>Three.js AI Studio — Turn prompts into 3D models</title>
+<meta name="description" content="Connect any OpenAI- or Anthropic-compatible endpoint, send a prompt and reference photos, and watch the AI build a Three.js 3D model you can explore." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%8A%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
 <div id="app">
 
-  <!-- ───────────────────────── 1. 연결 설정 화면 ───────────────────────── -->
+  <!-- ───────────────────────── 1. Connection setup ───────────────────────── -->
   <section id="screen-setup" class="screen active">
     <div class="setup-wrap">
       <header class="setup-head">
         <div class="logo">🧊</div>
         <h1>Three.js <span>AI</span> Studio</h1>
         <p class="tagline">
-          쓰고 싶은 AI 플랫폼의 <b>OpenAI / Anthropic 호환 엔드포인트</b>를 연결하세요.<br />
-          프롬프트와 사진을 보내면 AI가 Three.js 코드로 3D 모델을 만들어 드립니다.
+          Connect the <b>OpenAI- or Anthropic-compatible endpoint</b> of any AI platform you like.<br />
+          Send a prompt and a few photos, and the AI builds a 3D model with Three.js.
         </p>
       </header>
 
       <div class="card">
         <div class="field">
-          <label>AI 플랫폼 프리셋</label>
+          <label>Platform presets</label>
           <div id="presets" class="presets"></div>
         </div>
 
         <div class="grid2">
           <div class="field">
-            <label for="in-protocol">API 규격</label>
+            <label for="in-protocol">API format</label>
             <select id="in-protocol">
-              <option value="openai">OpenAI 호환 (/chat/completions)</option>
-              <option value="anthropic">Anthropic 호환 (/messages)</option>
+              <option value="openai">OpenAI-compatible (/chat/completions)</option>
+              <option value="anthropic">Anthropic-compatible (/messages)</option>
             </select>
-            <p class="hint">OpenRouter · Groq · Together · vLLM · Ollama · LM Studio 등은 대부분 OpenAI 호환입니다.</p>
+            <p class="hint">OpenRouter, Groq, Together, vLLM, Ollama and LM Studio are all OpenAI-compatible.</p>
           </div>
           <div class="field">
-            <label for="in-endpoint">엔드포인트 (Base URL)</label>
+            <label for="in-endpoint">Endpoint (base URL)</label>
             <input id="in-endpoint" type="url" spellcheck="false" placeholder="https://api.openai.com/v1" />
-            <p class="hint"><code>/chat/completions</code> 앞부분까지만 입력하면 됩니다.</p>
+            <p class="hint">Everything up to <code>/chat/completions</code> — that part is added for you.</p>
           </div>
         </div>
 
         <div class="field">
-          <label for="in-key">API 키</label>
+          <label for="in-key">API key</label>
           <div class="key-row">
-            <input id="in-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-... / 로컬 서버는 비워두어도 됩니다" />
-            <button id="btn-key-toggle" class="ghost" type="button" title="표시/숨김">👁</button>
+            <input id="in-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…  (leave empty for local servers)" />
+            <button id="btn-key-toggle" class="ghost" type="button" title="Show / hide">👁</button>
           </div>
-          <label class="check"><input id="in-remember" type="checkbox" /> 이 브라우저에 키 저장 (localStorage)</label>
+          <label class="check"><input id="in-remember" type="checkbox" /> Remember this key in the browser (localStorage)</label>
         </div>
 
         <details class="adv">
-          <summary>고급 설정</summary>
-          <label class="check"><input id="in-proxy" type="checkbox" /> 로컬 프록시 경유 <code>/api/proxy</code> — CORS를 막는 엔드포인트용 (<code>npm start</code> 필요)</label>
+          <summary>Advanced</summary>
+          <label class="check"><input id="in-proxy" type="checkbox" /> Route through the local proxy <code>/api/proxy</code> — for endpoints that block CORS (requires <code>npm start</code>)</label>
           <div class="grid2">
             <div class="field">
-              <label for="in-maxtokens">최대 출력 토큰</label>
+              <label for="in-maxtokens">Max output tokens</label>
               <input id="in-maxtokens" type="number" min="512" max="64000" step="256" value="8000" />
             </div>
             <div class="field">
@@ -70,122 +70,122 @@
         </details>
 
         <div class="field">
-          <label for="in-model">모델</label>
+          <label for="in-model">Model</label>
           <div class="model-row">
-            <input id="in-model" list="model-list" spellcheck="false" placeholder="모델 ID (예: gpt-4o, claude-sonnet-4-5)" />
+            <input id="in-model" list="model-list" spellcheck="false" placeholder="Model ID (e.g. gpt-4o, claude-sonnet-4-5)" />
             <datalist id="model-list"></datalist>
-            <button id="btn-load-models" class="ghost" type="button">모델 목록 불러오기</button>
+            <button id="btn-load-models" class="ghost" type="button">Load models</button>
           </div>
           <p id="model-status" class="hint"></p>
         </div>
 
         <div class="setup-actions">
-          <button id="btn-test" class="ghost" type="button">연결 테스트</button>
-          <button id="btn-start" class="primary" type="button">스튜디오 열기 →</button>
+          <button id="btn-test" class="ghost" type="button">Test connection</button>
+          <button id="btn-start" class="primary" type="button">Open studio →</button>
         </div>
         <p id="setup-msg" class="msg"></p>
       </div>
 
       <p class="foot-note">
-        API 키는 브라우저에만 보관되며 선택한 엔드포인트로만 전송됩니다. 다른 서버로 보내지 않습니다.
+        Your API key stays in this browser and is sent only to the endpoint you choose. Nothing is collected anywhere else.
       </p>
     </div>
   </section>
 
-  <!-- ───────────────────────── 2. 스튜디오 화면 ───────────────────────── -->
+  <!-- ───────────────────────── 2. Studio ───────────────────────── -->
   <section id="screen-studio" class="screen">
     <header class="topbar">
       <div class="brand"><span class="logo-sm">🧊</span> Three.js <b>AI</b> Studio</div>
       <div class="conn" id="conn-info"></div>
       <div class="top-actions">
-        <button id="btn-gallery" class="ghost sm" type="button">🗂 갤러리</button>
-        <button id="btn-settings" class="ghost sm" type="button">⚙︎ 연결 설정</button>
+        <button id="btn-gallery" class="ghost sm" type="button">🗂 Gallery</button>
+        <button id="btn-settings" class="ghost sm" type="button">⚙︎ Connection</button>
       </div>
     </header>
 
     <main class="studio">
-      <!-- 왼쪽: 입력 -->
+      <!-- Left: input -->
       <aside class="panel left">
         <div class="field">
-          <label for="in-prompt">무엇을 만들까요?</label>
-          <textarea id="in-prompt" rows="6" placeholder="예) 파스텔 톤의 아기자기한 등대가 있는 작은 섬. 물결치는 바다와 회전하는 등대 불빛까지."></textarea>
+          <label for="in-prompt">What should we build?</label>
+          <textarea id="in-prompt" rows="6" placeholder="e.g. A tiny pastel island with a lighthouse, rolling waves, and a beam that sweeps around."></textarea>
           <div id="examples" class="chips"></div>
         </div>
 
         <div class="field">
-          <label>참고 사진 <span class="dim">(선택 · 비전 모델 필요)</span></label>
+          <label>Reference photos <span class="dim">(optional · needs a vision model)</span></label>
           <div id="dropzone" class="dropzone">
             <input id="in-images" type="file" accept="image/*" multiple hidden />
-            <p>이미지를 끌어다 놓거나 <button id="btn-pick" class="linklike" type="button">파일 선택</button></p>
-            <p class="hint">최대 4장 · 붙여넣기(Ctrl+V)도 됩니다</p>
+            <p>Drop images here or <button id="btn-pick" class="linklike" type="button">choose files</button></p>
+            <p class="hint">Up to 4 · pasting (Ctrl+V) works too</p>
           </div>
           <div id="thumbs" class="thumbs"></div>
         </div>
 
         <div class="grid2">
           <div class="field">
-            <label for="in-style">스타일</label>
+            <label for="in-style">Style</label>
             <select id="in-style">
-              <option value="low-poly stylized">로우폴리 · 스타일라이즈드</option>
-              <option value="realistic PBR-ish">사실적(PBR 느낌)</option>
-              <option value="voxel / blocky">복셀 · 블록</option>
-              <option value="toon / cel-shaded flat colors">툰 · 셀셰이딩</option>
-              <option value="minimal geometric abstract">미니멀 · 기하 추상</option>
-              <option value="neon sci-fi glow">네온 · 사이버펑크</option>
+              <option value="low-poly stylized">Low-poly · stylized</option>
+              <option value="realistic PBR-ish">Realistic (PBR-ish)</option>
+              <option value="voxel / blocky">Voxel · blocky</option>
+              <option value="toon / cel-shaded flat colors">Toon · cel-shaded</option>
+              <option value="minimal geometric abstract">Minimal · geometric</option>
+              <option value="neon sci-fi glow">Neon · cyberpunk</option>
             </select>
           </div>
           <div class="field">
-            <label for="in-detail">디테일</label>
+            <label for="in-detail">Detail</label>
             <select id="in-detail">
-              <option value="simple">가볍게</option>
-              <option value="medium" selected>보통</option>
-              <option value="rich">정교하게</option>
+              <option value="simple">Simple</option>
+              <option value="medium" selected>Balanced</option>
+              <option value="rich">Detailed</option>
             </select>
           </div>
         </div>
 
-        <label class="check"><input id="in-animate" type="checkbox" checked /> 애니메이션 포함</label>
+        <label class="check"><input id="in-animate" type="checkbox" checked /> Include animation</label>
 
-        <button id="btn-generate" class="primary big" type="button">✨ 3D 모델 생성</button>
-        <button id="btn-stop" class="ghost" type="button" hidden>■ 생성 중지</button>
+        <button id="btn-generate" class="primary big" type="button">✨ Generate 3D model</button>
+        <button id="btn-stop" class="ghost" type="button" hidden>■ Stop generating</button>
 
         <div id="followup" class="field" hidden>
-          <label for="in-followup">이어서 수정하기</label>
-          <textarea id="in-followup" rows="3" placeholder="예) 지붕을 빨간색으로 바꾸고 창문을 더 크게"></textarea>
-          <button id="btn-refine" class="ghost" type="button">↻ 수정 반영</button>
+          <label for="in-followup">Keep refining</label>
+          <textarea id="in-followup" rows="3" placeholder="e.g. Make the roof red and the windows bigger"></textarea>
+          <button id="btn-refine" class="ghost" type="button">↻ Apply change</button>
         </div>
       </aside>
 
-      <!-- 가운데: 뷰어 -->
+      <!-- Center: viewer -->
       <section class="panel center">
         <div class="viewer-toolbar">
           <div class="tabs">
-            <button class="tab active" data-view="preview" type="button">미리보기</button>
-            <button class="tab" data-view="code" type="button">코드</button>
-            <button class="tab" data-view="log" type="button">로그</button>
+            <button class="tab active" data-view="preview" type="button">Preview</button>
+            <button class="tab" data-view="code" type="button">Code</button>
+            <button class="tab" data-view="log" type="button">Log</button>
           </div>
           <div class="spacer"></div>
-          <button class="ghost sm" id="btn-rotate" type="button" title="자동 회전">↻ 회전</button>
-          <button class="ghost sm" id="btn-wire" type="button" title="와이어프레임">▩ 와이어</button>
-          <button class="ghost sm" id="btn-grid" type="button" title="그리드">▦ 그리드</button>
-          <button class="ghost sm" id="btn-shot" type="button" title="PNG 저장">📷 PNG</button>
-          <button class="ghost sm" id="btn-glb" type="button" title="GLB 내보내기">⬇ GLB</button>
-          <button class="ghost sm" id="btn-code-dl" type="button" title="코드 저장">⬇ 코드</button>
+          <button class="ghost sm" id="btn-rotate" type="button" title="Auto-rotate">↻ Rotate</button>
+          <button class="ghost sm" id="btn-wire" type="button" title="Wireframe">▩ Wire</button>
+          <button class="ghost sm" id="btn-grid" type="button" title="Grid">▦ Grid</button>
+          <button class="ghost sm" id="btn-shot" type="button" title="Save PNG">📷 PNG</button>
+          <button class="ghost sm" id="btn-glb" type="button" title="Export GLB">⬇ GLB</button>
+          <button class="ghost sm" id="btn-code-dl" type="button" title="Download code">⬇ Code</button>
         </div>
 
         <div class="view-stack">
           <div class="view active" data-view="preview">
-            <iframe id="sandbox" title="3D 미리보기" sandbox="allow-scripts"></iframe>
+            <iframe id="sandbox" title="3D preview" sandbox="allow-scripts"></iframe>
             <div id="viewer-empty" class="overlay">
               <div>
                 <div class="big-emoji">🪄</div>
-                <p>왼쪽에 만들고 싶은 것을 적고 <b>생성</b>을 눌러 보세요.</p>
+                <p>Describe what you want on the left and hit <b>Generate</b>.</p>
               </div>
             </div>
             <div id="viewer-busy" class="overlay busy" hidden>
               <div>
                 <div class="spinner"></div>
-                <p id="busy-text">AI가 모델을 설계하는 중…</p>
+                <p id="busy-text">The AI is designing your model…</p>
                 <p class="hint" id="busy-sub"></p>
               </div>
             </div>
@@ -193,13 +193,13 @@
               <div>
                 <div class="big-emoji">⚠️</div>
                 <p id="error-text"></p>
-                <button id="btn-autofix" class="primary" type="button">AI에게 고치라고 하기</button>
+                <button id="btn-autofix" class="primary" type="button">Ask the AI to fix it</button>
               </div>
             </div>
           </div>
 
           <div class="view" data-view="code">
-            <pre id="code-out"><code>아직 생성된 코드가 없습니다.</code></pre>
+            <pre id="code-out"><code>No code generated yet.</code></pre>
           </div>
 
           <div class="view" data-view="log">
@@ -208,19 +208,19 @@
         </div>
 
         <footer class="viewer-foot">
-          <span id="stat-line" class="dim">준비됨</span>
+          <span id="stat-line" class="dim">Ready</span>
         </footer>
       </section>
     </main>
 
-    <!-- 갤러리 서랍 -->
+    <!-- Gallery drawer -->
     <div id="gallery" class="drawer" hidden>
       <div class="drawer-head">
-        <b>🗂 내 갤러리</b>
+        <b>🗂 Gallery</b>
         <span class="dim" id="gallery-count"></span>
         <div class="spacer"></div>
-        <button id="btn-gallery-clear" class="ghost sm" type="button">전체 삭제</button>
-        <button id="btn-gallery-close" class="ghost sm" type="button">닫기</button>
+        <button id="btn-gallery-clear" class="ghost sm" type="button">Clear all</button>
+        <button id="btn-gallery-close" class="ghost sm" type="button">Close</button>
       </div>
       <div id="gallery-items" class="gallery-items"></div>
     </div>

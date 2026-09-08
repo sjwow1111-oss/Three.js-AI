@@ -3,7 +3,7 @@ import { SYSTEM_PROMPT, buildUserPrompt, buildRefinePrompt, buildFixPrompt, extr
 import { Viewer } from './viewer.js';
 import * as store from './store.js';
 
-/* ── 짧은 헬퍼 ──────────────────────────────────── */
+/* ── small helpers ─────────────────────────────── */
 const $ = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -19,7 +19,7 @@ function toast(text, ms = 2200) {
 
 function log(line) {
   const el = $('log-out');
-  const time = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+  const time = new Date().toLocaleTimeString([], { hour12: false });
   el.textContent += `[${time}] ${line}\n`;
   el.scrollTop = el.scrollHeight;
 }
@@ -38,11 +38,11 @@ function download(blob, filename) {
 const slug = (s) => (s || 'model').trim().toLowerCase()
   .replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 40) || 'model';
 
-/* ── 앱 상태 ────────────────────────────────────── */
+/* ── app state ────────────────────────────────── */
 const state = {
   cfg: { ...store.loadSettings(), apiKey: store.loadApiKey() },
   images: [],            // { mime, data(base64), url(dataURL) }
-  history: [],           // 모델과 주고받은 대화
+  history: [],           // conversation with the model
   code: '',
   lastPrompt: '',
   busy: false,
@@ -54,7 +54,7 @@ const state = {
 const viewer = new Viewer($('sandbox'));
 
 /* ══════════════════════════════════════════════════
-   1. 연결 설정 화면
+   1. Connection setup screen
    ══════════════════════════════════════════════════ */
 function renderPresets() {
   const box = $('presets');
@@ -114,9 +114,9 @@ function setupMsg(text, kind = 'info') {
 }
 
 function validate(cfg) {
-  if (!cfg.endpoint) return '엔드포인트(Base URL)를 입력해 주세요.';
-  try { new URL(normalizeBase(cfg.endpoint)); } catch { return '엔드포인트 주소 형식이 올바르지 않습니다.'; }
-  if (!cfg.model) return '모델 ID를 입력하거나 목록에서 선택해 주세요.';
+  if (!cfg.endpoint) return 'Please enter an endpoint (base URL).';
+  try { new URL(normalizeBase(cfg.endpoint)); } catch { return 'That endpoint URL does not look valid.'; }
+  if (!cfg.model) return 'Enter a model ID or pick one from the list.';
   return '';
 }
 
@@ -127,13 +127,13 @@ $('btn-key-toggle').onclick = () => {
 
 $('btn-load-models').onclick = async (e) => {
   const cfg = readSetupForm();
-  if (!cfg.endpoint) { setupMsg('먼저 엔드포인트를 입력해 주세요.', 'err'); return; }
+  if (!cfg.endpoint) { setupMsg('Enter an endpoint first.', 'err'); return; }
   e.target.disabled = true;
-  $('model-status').textContent = '모델 목록을 불러오는 중…';
+  $('model-status').textContent = 'Loading models…';
   try {
     const ids = await listModels(cfg);
     $('model-list').innerHTML = ids.map((id) => `<option value="${esc(id)}"></option>`).join('');
-    $('model-status').textContent = `${ids.length}개 모델을 찾았습니다. 입력창을 클릭해 선택하세요.`;
+    $('model-status').textContent = `Found ${ids.length} models — click the field to pick one.`;
     if (!$('in-model').value && ids.length) {
       const pick = ids.find((i) => /gpt-4o|claude|sonnet|llama-3|qwen/i.test(i)) || ids[0];
       $('in-model').value = pick;
@@ -141,7 +141,7 @@ $('btn-load-models').onclick = async (e) => {
     setupMsg('', 'info');
   } catch (err) {
     $('model-status').textContent = '';
-    setupMsg('모델 목록 실패: ' + err.message + ' — 모델 ID를 직접 입력해도 됩니다. (CORS 오류라면 고급 설정에서 프록시를 켜 보세요.)', 'err');
+    setupMsg('Could not list models: ' + err.message + ' — you can still type a model ID by hand. (If this is a CORS error, try the local proxy under Advanced.)', 'err');
   } finally {
     e.target.disabled = false;
   }
@@ -152,12 +152,12 @@ $('btn-test').onclick = async (e) => {
   const problem = validate(cfg);
   if (problem) { setupMsg(problem, 'err'); return; }
   e.target.disabled = true;
-  setupMsg('연결을 확인하는 중…', 'info');
+  setupMsg('Checking the connection…', 'info');
   try {
     const reply = await testConnection(cfg);
-    setupMsg(`연결 성공 ✓ 모델 응답: "${reply}"`, 'ok');
+    setupMsg(`Connected ✓ the model replied: "${reply}"`, 'ok');
   } catch (err) {
-    setupMsg('연결 실패: ' + err.message, 'err');
+    setupMsg('Connection failed: ' + err.message, 'err');
   } finally {
     e.target.disabled = false;
   }
@@ -175,7 +175,7 @@ $('btn-start').onclick = () => {
 };
 
 /* ══════════════════════════════════════════════════
-   2. 스튜디오
+   2. Studio
    ══════════════════════════════════════════════════ */
 function showScreen(id) {
   $$('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
@@ -184,23 +184,23 @@ function showScreen(id) {
 function openStudio() {
   const c = state.cfg;
   $('conn-info').innerHTML =
-    `<b>${esc(c.protocol === 'anthropic' ? 'Anthropic 호환' : 'OpenAI 호환')}</b> · ` +
-    `<b>${esc(c.model)}</b> · ${esc(normalizeBase(c.endpoint))}${c.proxy ? ' · 프록시' : ''}`;
+    `<b>${esc(c.protocol === 'anthropic' ? 'Anthropic-compatible' : 'OpenAI-compatible')}</b> · ` +
+    `<b>${esc(c.model)}</b> · ${esc(normalizeBase(c.endpoint))}${c.proxy ? ' · via proxy' : ''}`;
   showScreen('screen-studio');
-  log(`연결됨: ${normalizeBase(c.endpoint)} (${c.protocol}) / 모델 ${c.model}`);
+  log(`Connected to ${normalizeBase(c.endpoint)} (${c.protocol}) using model ${c.model}`);
 }
 
 $('btn-settings').onclick = () => { fillSetupForm(); setupMsg(''); showScreen('screen-setup'); };
 
-/* ── 예시 프롬프트 ─────────────────────────────── */
+/* ── example prompts ──────────────────────────── */
 const EXAMPLES = [
-  '눈 덮인 산 위의 작은 통나무집, 창문에서 새어나오는 따뜻한 불빛',
-  '레트로 스타일의 빨간 스포츠카',
-  '떠다니는 섬 위의 마법사 탑',
-  '로우폴리 고양이',
-  '토성 같은 고리를 가진 행성과 궤도를 도는 위성',
-  '유리 돔 안의 작은 다육식물 정원',
-  '네온사인이 가득한 사이버펑크 골목 간판',
+  'A tiny log cabin on a snowy mountain, warm light spilling from the windows',
+  'A retro red sports car',
+  'A wizard tower on a floating island',
+  'A low-poly cat',
+  'A ringed planet with a moon in orbit',
+  'A little succulent garden under a glass dome',
+  'A cyberpunk alley sign covered in neon',
 ];
 $('examples').innerHTML = EXAMPLES.map((t, i) => `<button type="button" data-i="${i}">${esc(t)}</button>`).join('');
 $('examples').onclick = (e) => {
@@ -210,16 +210,16 @@ $('examples').onclick = (e) => {
   $('in-prompt').focus();
 };
 
-/* ── 이미지 입력 ───────────────────────────────── */
+/* ── reference images ─────────────────────────── */
 const MAX_IMAGES = 4;
 
 function fileToDownscaledImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('이미지를 읽지 못했습니다.'));
+    reader.onerror = () => reject(new Error('Could not read that image.'));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error('이미지 형식을 인식하지 못했습니다.'));
+      img.onerror = () => reject(new Error('Unrecognized image format.'));
       img.onload = () => {
         const max = 1024;
         const scale = Math.min(1, max / Math.max(img.width, img.height));
@@ -241,7 +241,7 @@ function fileToDownscaledImage(file) {
 
 async function addImages(files) {
   for (const file of files) {
-    if (state.images.length >= MAX_IMAGES) { toast(`사진은 최대 ${MAX_IMAGES}장까지 첨부됩니다.`); break; }
+    if (state.images.length >= MAX_IMAGES) { toast(`You can attach up to ${MAX_IMAGES} photos.`); break; }
     if (!file.type.startsWith('image/')) continue;
     try { state.images.push(await fileToDownscaledImage(file)); }
     catch (err) { toast(err.message); }
@@ -252,7 +252,7 @@ async function addImages(files) {
 function renderThumbs() {
   const box = $('thumbs');
   box.innerHTML = state.images
-    .map((im, i) => `<div class="thumb"><img src="${im.url}" alt="참고 사진 ${i + 1}"><button type="button" data-i="${i}" title="삭제">×</button></div>`)
+    .map((im, i) => `<div class="thumb"><img src="${im.url}" alt="Reference photo ${i + 1}"><button type="button" data-i="${i}" title="Remove">×</button></div>`)
     .join('');
   $$('button', box).forEach((b) => {
     b.onclick = () => { state.images.splice(Number(b.dataset.i), 1); renderThumbs(); };
@@ -276,7 +276,7 @@ document.addEventListener('paste', (e) => {
   if (files.length) { e.preventDefault(); addImages(files); }
 });
 
-/* ── 탭 전환 ───────────────────────────────────── */
+/* ── tabs ─────────────────────────────────────── */
 $$('.tab').forEach((tab) => {
   tab.onclick = () => {
     $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
@@ -285,7 +285,7 @@ $$('.tab').forEach((tab) => {
 });
 const showTab = (name) => $$('.tab').find((t) => t.dataset.view === name)?.click();
 
-/* ── 뷰어 옵션 버튼 ────────────────────────────── */
+/* ── viewer toggles ───────────────────────────── */
 function bindToggle(id, key, label) {
   const btn = $(id);
   btn.classList.toggle('on', state.view[key]);
@@ -293,38 +293,38 @@ function bindToggle(id, key, label) {
     state.view[key] = !state.view[key];
     btn.classList.toggle('on', state.view[key]);
     viewer.setOptions({ [key]: state.view[key] });
-    toast(`${label} ${state.view[key] ? '켜짐' : '꺼짐'}`, 1100);
+    toast(`${label} ${state.view[key] ? 'on' : 'off'}`, 1100);
   };
 }
-bindToggle('btn-rotate', 'autoRotate', '자동 회전');
-bindToggle('btn-wire', 'wireframe', '와이어프레임');
-bindToggle('btn-grid', 'grid', '그리드');
+bindToggle('btn-rotate', 'autoRotate', 'Auto-rotate');
+bindToggle('btn-wire', 'wireframe', 'Wireframe');
+bindToggle('btn-grid', 'grid', 'Grid');
 
 $('btn-shot').onclick = async () => {
-  if (!state.code) { toast('먼저 모델을 생성해 주세요.'); return; }
+  if (!state.code) { toast('Generate a model first.'); return; }
   try {
     const dataUrl = await viewer.screenshot();
     const blob = await (await fetch(dataUrl)).blob();
     download(blob, `${slug(state.lastPrompt)}.png`);
-    toast('PNG를 저장했습니다.');
-  } catch (err) { toast('캡처 실패: ' + err.message); }
+    toast('Saved a PNG.');
+  } catch (err) { toast('Capture failed: ' + err.message); }
 };
 
 $('btn-glb').onclick = async () => {
-  if (!state.code) { toast('먼저 모델을 생성해 주세요.'); return; }
+  if (!state.code) { toast('Generate a model first.'); return; }
   try {
     const buffer = await viewer.exportGLB();
     download(new Blob([buffer], { type: 'model/gltf-binary' }), `${slug(state.lastPrompt)}.glb`);
-    toast('GLB를 저장했습니다. Blender·게임엔진에서 열 수 있어요.');
-  } catch (err) { toast('GLB 내보내기 실패: ' + err.message); }
+    toast('Saved a GLB — open it in Blender or a game engine.');
+  } catch (err) { toast('GLB export failed: ' + err.message); }
 };
 
 $('btn-code-dl').onclick = () => {
-  if (!state.code) { toast('먼저 모델을 생성해 주세요.'); return; }
+  if (!state.code) { toast('Generate a model first.'); return; }
   download(new Blob([state.code], { type: 'text/javascript' }), `${slug(state.lastPrompt)}.js`);
 };
 
-/* ── 생성 파이프라인 ───────────────────────────── */
+/* ── generation pipeline ──────────────────────── */
 function setBusy(on, text = '', sub = '') {
   state.busy = on;
   $('viewer-busy').hidden = !on;
@@ -340,17 +340,17 @@ function showError(message) {
   $('error-text').textContent = message;
   $('viewer-error').hidden = false;
   $('viewer-empty').hidden = true;
-  log('오류: ' + message.split('\n')[0]);
+  log('Error: ' + message.split('\n')[0]);
 }
 
 $('btn-stop').onclick = () => {
   state.abort?.abort();
-  toast('생성을 중지했습니다.');
+  toast('Generation stopped.');
 };
 
-/** 모델에게 코드를 요청하고 스트리밍으로 받아온다 */
+/** Ask the model for code and stream the answer in */
 async function askForCode(userMessage, busyLabel) {
-  setBusy(true, busyLabel, '응답을 기다리는 중…');
+  setBusy(true, busyLabel, 'Waiting for the first tokens…');
   const controller = new AbortController();
   state.abort = controller;
 
@@ -367,7 +367,7 @@ async function askForCode(userMessage, busyLabel) {
       onDelta: (chunk) => {
         streamed += chunk;
         $('code-out').textContent = streamed;
-        $('busy-sub').textContent = `${streamed.length.toLocaleString()}자 생성됨…`;
+        $('busy-sub').textContent = `${streamed.length.toLocaleString()} characters so far…`;
       },
     });
   } catch (err) {
@@ -382,11 +382,11 @@ async function askForCode(userMessage, busyLabel) {
   return code;
 }
 
-/** 코드를 뷰어에서 실행하고, 실패하면 한 번 자동 수정을 시도한다 */
+/** Run the code in the viewer; on failure, ask the AI to fix it once */
 async function runCode(code) {
   state.code = code;
   $('code-out').textContent = code;
-  setBusy(true, '3D 씬을 만드는 중…', '');
+  setBusy(true, 'Building the 3D scene…', '');
   try {
     const stats = await viewer.run(code);
     state.fixTries = 0;
@@ -395,9 +395,9 @@ async function runCode(code) {
     $('viewer-empty').hidden = true;
     $('followup').hidden = false;
     $('stat-line').textContent =
-      `메시 ${stats.meshes}개 · 삼각형 ${stats.triangles.toLocaleString()}개 · 빌드 ${stats.ms}ms` +
-      (stats.animated ? ' · 애니메이션 있음' : '');
-    log(`모델 생성 완료 (메시 ${stats.meshes}, 삼각형 ${stats.triangles})`);
+      `${stats.meshes} meshes · ${stats.triangles.toLocaleString()} triangles · built in ${stats.ms}ms` +
+      (stats.animated ? ' · animated' : '');
+    log(`Model ready (${stats.meshes} meshes, ${stats.triangles} triangles)`);
     saveSnapshotToGallery();
     return true;
   } catch (err) {
@@ -406,8 +406,8 @@ async function runCode(code) {
     if (viewer.bootError) { showError(message); return false; }
     if (state.fixTries < 1) {
       state.fixTries++;
-      log('실행 오류 발생 → AI에게 자동 수정을 요청합니다.');
-      toast('오류가 나서 AI에게 수정을 요청했습니다…');
+      log('Runtime error — asking the AI to fix it.');
+      toast('That code threw an error — asking the AI to fix it…');
       return autoFix(message);
     }
     showError(message);
@@ -419,12 +419,12 @@ async function autoFix(errorMessage) {
   try {
     const code = await askForCode(
       { role: 'user', text: buildFixPrompt(errorMessage) },
-      '오류를 고치는 중…'
+      'Fixing the error…'
     );
     return runCode(code);
   } catch (err) {
     setBusy(false);
-    showError(errorMessage + '\n\n[자동 수정 실패] ' + (err.message || err));
+    showError(errorMessage + '\n\n[auto-fix failed] ' + (err.message || err));
     return false;
   }
 }
@@ -438,11 +438,11 @@ $('btn-autofix').onclick = () => {
 
 $('btn-generate').onclick = async () => {
   const prompt = $('in-prompt').value.trim();
-  if (!prompt && !state.images.length) { toast('만들고 싶은 것을 적거나 사진을 첨부해 주세요.'); return; }
+  if (!prompt && !state.images.length) { toast('Describe what you want, or attach a photo.'); return; }
 
   state.history = [];
   state.fixTries = 0;
-  state.lastPrompt = prompt || '사진 기반 모델';
+  state.lastPrompt = prompt || 'model from photos';
   $('code-out').textContent = '';
   showTab('preview');
 
@@ -453,42 +453,42 @@ $('btn-generate').onclick = async () => {
     animate: $('in-animate').checked,
     hasImages: state.images.length > 0,
   });
-  log(`생성 요청: "${state.lastPrompt}" (사진 ${state.images.length}장)`);
+  log(`Generating: "${state.lastPrompt}" (${state.images.length} photo(s))`);
 
   try {
     const code = await askForCode(
       { role: 'user', text, images: state.images.map(({ mime, data }) => ({ mime, data })) },
-      'AI가 모델을 설계하는 중…'
+      'The AI is designing your model…'
     );
     await runCode(code);
   } catch (err) {
     setBusy(false);
     if (err.name === 'AbortError') { $('viewer-empty').hidden = false; return; }
-    showError('API 요청 실패\n' + (err.message || err));
+    showError('API request failed\n' + (err.message || err));
   }
 };
 
 $('btn-refine').onclick = async () => {
   const instruction = $('in-followup').value.trim();
-  if (!instruction) { toast('무엇을 바꿀지 적어 주세요.'); return; }
-  if (!state.code) { toast('먼저 모델을 생성해 주세요.'); return; }
+  if (!instruction) { toast('Describe what you want changed.'); return; }
+  if (!state.code) { toast('Generate a model first.'); return; }
   state.fixTries = 0;
-  log('수정 요청: ' + instruction);
+  log('Refine: ' + instruction);
   try {
-    const code = await askForCode({ role: 'user', text: buildRefinePrompt(instruction) }, '모델을 수정하는 중…');
+    const code = await askForCode({ role: 'user', text: buildRefinePrompt(instruction) }, 'Updating the model…');
     $('in-followup').value = '';
     await runCode(code);
   } catch (err) {
     setBusy(false);
     if (err.name === 'AbortError') return;
-    showError('API 요청 실패\n' + (err.message || err));
+    showError('API request failed\n' + (err.message || err));
   }
 };
 
-/* ── 갤러리 ────────────────────────────────────── */
+/* ── gallery ──────────────────────────────────── */
 async function saveSnapshotToGallery() {
   try {
-    await new Promise((r) => setTimeout(r, 350));   // 첫 프레임이 안정될 시간
+    await new Promise((r) => setTimeout(r, 350));   // let the first frames settle
     const thumb = await viewer.thumbnail();
     store.addToGallery({
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -499,16 +499,16 @@ async function saveSnapshotToGallery() {
     });
     renderGallery();
   } catch (err) {
-    log('갤러리 저장 건너뜀: ' + (err.message || err));
+    log('Skipped saving to the gallery: ' + (err.message || err));
   }
 }
 
 function renderGallery() {
   const rows = store.loadGallery();
-  $('gallery-count').textContent = `${rows.length}개`;
+  $('gallery-count').textContent = `${rows.length} saved`;
   const box = $('gallery-items');
   if (!rows.length) {
-    box.innerHTML = '<p class="dim">아직 저장된 작품이 없습니다. 모델을 생성하면 자동으로 쌓입니다.</p>';
+    box.innerHTML = '<p class="dim">Nothing saved yet — every model you generate lands here automatically.</p>';
     return;
   }
   box.innerHTML = rows.map((r) => `
@@ -516,9 +516,9 @@ function renderGallery() {
       <img src="${r.thumb}" alt="${esc(r.title)}" loading="lazy">
       <div class="meta">
         <div class="title">${esc(r.title)}</div>
-        <div class="when">${new Date(r.at).toLocaleString('ko-KR')}</div>
+        <div class="when">${new Date(r.at).toLocaleString()}</div>
       </div>
-      <button class="del" type="button" data-del="${r.id}">삭제</button>
+      <button class="del" type="button" data-del="${r.id}">Delete</button>
     </div>`).join('');
 
   $$('.gcard', box).forEach((card) => {
@@ -532,7 +532,7 @@ function renderGallery() {
       $('gallery').hidden = true;
       showTab('preview');
       runCode(item.code);
-      toast('갤러리에서 불러왔습니다.');
+      toast('Loaded from the gallery.');
     };
   });
   $$('[data-del]', box).forEach((b) => {
@@ -543,24 +543,24 @@ function renderGallery() {
 $('btn-gallery').onclick = () => { $('gallery').hidden = !$('gallery').hidden; renderGallery(); };
 $('btn-gallery-close').onclick = () => { $('gallery').hidden = true; };
 $('btn-gallery-clear').onclick = () => {
-  if (confirm('갤러리의 모든 작품을 삭제할까요?')) { store.clearGallery(); renderGallery(); }
+  if (confirm('Delete every model saved in the gallery?')) { store.clearGallery(); renderGallery(); }
 };
 
-/* ── 뷰어 이벤트 ───────────────────────────────── */
+/* ── viewer events ────────────────────────────── */
 viewer.onError = (message) => {
-  if (state.busy) return;                 // 생성 중 오류는 파이프라인이 처리한다
-  if (!state.code) showError(message);    // 뷰어 부팅 실패 등
-  else log('뷰어 경고: ' + message.split('\n')[0]);
+  if (state.busy) return;                 // errors during generation are handled by the pipeline
+  if (!state.code) showError(message);    // boot failure and the like
+  else log('Viewer warning: ' + message.split('\n')[0]);
 };
 
-/* ── 시작 ──────────────────────────────────────── */
+/* ── boot ─────────────────────────────────────── */
 fillSetupForm();
 renderGallery();
 viewer.ready.then(() => {
   viewer.setOptions(state.view);
-  log('뷰어 준비 완료 (샌드박스 iframe)');
+  log('Viewer ready (sandboxed iframe)');
 }).catch((err) => {
-  log('뷰어 초기화 실패: ' + err.message);
+  log('Viewer failed to start: ' + err.message);
 });
 
 addEventListener('keydown', (e) => {

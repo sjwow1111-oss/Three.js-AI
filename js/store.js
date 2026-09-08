@@ -1,4 +1,4 @@
-/** localStorage 기반 설정 · 갤러리 저장소 */
+/** Settings and gallery storage, backed by localStorage */
 
 const SETTINGS_KEY = 'threejs-ai-studio.settings';
 const KEY_KEY = 'threejs-ai-studio.apikey';
@@ -41,10 +41,10 @@ export function saveApiKey(key, remember) {
   try {
     if (remember && key) localStorage.setItem(KEY_KEY, key);
     else localStorage.removeItem(KEY_KEY);
-  } catch { /* 저장 불가 환경 */ }
+  } catch { /* storage unavailable */ }
 }
 
-/* ── 갤러리 ─────────────────────────────────────── */
+/* ── gallery ────────────────────────────────────── */
 export function loadGallery() {
   const rows = read(GALLERY_KEY, []);
   return Array.isArray(rows) ? rows : [];
@@ -54,7 +54,7 @@ export function addToGallery(item) {
   const rows = loadGallery();
   rows.unshift(item);
   while (rows.length > GALLERY_MAX) rows.pop();
-  // 용량 초과 시 오래된 항목부터 버리며 재시도
+  // on quota errors, drop the oldest entries and retry
   while (rows.length && !write(GALLERY_KEY, rows)) rows.pop();
   return rows;
 }

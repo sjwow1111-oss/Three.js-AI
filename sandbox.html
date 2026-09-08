@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>3D 미리보기 샌드박스</title>
+<title>3D preview sandbox</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#0e1016}
   canvas{display:block;width:100%;height:100%}
@@ -21,16 +21,16 @@
 <div id="hud"></div>
 <script type="module">
 /**
- * 격리된 샌드박스 뷰어.
- * 부모(스튜디오)와는 postMessage로만 통신하며, AI가 생성한 코드는 여기에서만 실행된다.
- * iframe에 allow-same-origin이 없으므로 이 문서는 opaque origin이고,
- * 부모 페이지의 DOM·스토리지·API 키에 접근할 수 없다.
+ * The isolated viewer sandbox.
+ * It talks to the parent (the studio) only through postMessage, and AI-generated
+ * code runs nowhere else. The iframe has no allow-same-origin, so this document
+ * lives on an opaque origin and cannot touch the parent's DOM, storage, or API key.
  */
 const send = (msg, transfer) => parent.postMessage(msg, '*', transfer || []);
 const hud = document.getElementById('hud');
 
-// three.js는 importmap을 통해 CDN에서 가져온다. 실패하면 부모에게 알려
-// 무한 로딩 대신 원인을 볼 수 있게 한다.
+// three.js comes from the CDN via the import map above. If that fails, tell the
+// parent so the user sees the reason instead of an endless spinner.
 let THREE, OrbitControls, GLTFExporter, RoomEnvironment;
 try {
   THREE = await import('three');
@@ -39,19 +39,19 @@ try {
   ({ RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js'));
 } catch (err) {
   const why = (err && err.message) || String(err);
-  hud.textContent = 'three.js 로드 실패';
-  send({ type: 'boot-error', message: 'three.js를 CDN에서 불러오지 못했습니다.\n' + why +
-    '\n\n인터넷 연결 또는 방화벽(unpkg.com 접근)을 확인해 주세요.' });
+  hud.textContent = 'three.js failed to load';
+  send({ type: 'boot-error', message: 'Could not load three.js from the CDN.\n' + why +
+    '\n\nCheck your internet connection or whether unpkg.com is blocked.' });
   throw err;
 }
 
-/* ── 기본 씬 구성 ─────────────────────────────────── */
+/* ── base scene ───────────────────────────────────── */
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 } catch (err) {
-  hud.textContent = 'WebGL 사용 불가';
-  send({ type: 'boot-error', message: '이 브라우저/기기에서 WebGL을 초기화하지 못했습니다.\n' + ((err && err.message) || err) });
+  hud.textContent = 'WebGL unavailable';
+  send({ type: 'boot-error', message: 'WebGL could not be initialized on this browser or device.\n' + ((err && err.message) || err) });
   throw err;
 }
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -79,7 +79,7 @@ controls.maxPolarAngle = Math.PI * 0.495;
 controls.minDistance = 0.4;
 controls.maxDistance = 400;
 
-// 조명 (호스트 제공)
+// lights (provided by the host)
 const hemi = new THREE.HemisphereLight(0xdfe9ff, 0x2b3040, 0.65);
 scene.add(hemi);
 const key = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -93,7 +93,7 @@ const rim = new THREE.DirectionalLight(0x8fb6ff, 0.85);
 rim.position.set(-9, 5, -8);
 scene.add(rim);
 
-// 그림자 받이 바닥 + 그리드
+// shadow catcher + grid
 const shadowCatcher = new THREE.Mesh(
   new THREE.PlaneGeometry(400, 400),
   new THREE.ShadowMaterial({ opacity: 0.32 })
@@ -108,9 +108,9 @@ grid.material.opacity = 0.55;
 grid.visible = true;
 scene.add(grid);
 
-/* ── 상태 ────────────────────────────────────────── */
-let current = null;      // 생성된 THREE.Object3D
-let updateFn = null;     // 사용자 코드의 update()
+/* ── state ────────────────────────────────────────── */
+let current = null;      // the generated THREE.Object3D
+let updateFn = null;     // update() from the generated code
 let autoRotate = false;
 let wireframe = false;
 let updateFailed = false;
@@ -138,7 +138,7 @@ function clearModel() {
   scene.fog = null;
 }
 
-/** 모델 크기에 맞춰 카메라·그림자·그리드 배치 */
+/** Fit the camera, shadow frustum, and grid to the model's size */
 function frameObject(obj) {
   const box = new THREE.Box3().setFromObject(obj);
   if (box.isEmpty() || !isFinite(box.min.x)) return null;
@@ -195,7 +195,7 @@ function applyWireframe(on) {
   });
 }
 
-/* ── AI 코드 실행 ────────────────────────────────── */
+/* ── running the AI's code ────────────────────────── */
 function run(code) {
   clearModel();
   const started = performance.now();
@@ -210,11 +210,11 @@ function run(code) {
     const ctx = { scene, camera, renderer };
     const api = factory(THREE, ctx);
     if (!api || typeof api.createModel !== 'function') {
-      throw new Error('createModel(THREE, ctx) 함수가 정의되지 않았습니다.');
+      throw new Error('No createModel(THREE, ctx) function was defined.');
     }
     const root = api.createModel(THREE, ctx);
     if (!root || !root.isObject3D) {
-      throw new Error('createModel()이 THREE.Object3D를 반환하지 않았습니다.');
+      throw new Error('createModel() did not return a THREE.Object3D.');
     }
     current = root;
     updateFn = typeof api.update === 'function' ? api.update : null;
@@ -223,7 +223,7 @@ function run(code) {
     const framed = frameObject(root) || { radius: 5 };
     applyWireframe(wireframe);
 
-    // 첫 프레임을 즉시 렌더해 런타임 오류를 조기에 잡는다
+    // render one frame right away so runtime errors surface immediately
     renderer.render(scene, camera);
     if (updateFn) updateFn(current, 0, 0);
 
@@ -241,12 +241,12 @@ function run(code) {
 }
 
 function formatError(err) {
-  const msg = (err && (err.message || String(err))) || '알 수 없는 오류';
+  const msg = (err && (err.message || String(err))) || 'Unknown error';
   const stack = err && err.stack ? String(err.stack).split('\n').slice(0, 4).join('\n') : '';
   return stack && !stack.includes(msg) ? msg + '\n' + stack : (stack || msg);
 }
 
-/* ── 렌더 루프 ───────────────────────────────────── */
+/* ── render loop ──────────────────────────────────── */
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -256,7 +256,7 @@ function tick() {
     try { updateFn(current, t, dt); }
     catch (err) {
       updateFailed = true;
-      send({ type: 'error', message: 'update() 실행 중 오류\n' + formatError(err) });
+      send({ type: 'error', message: 'update() threw an error\n' + formatError(err) });
     }
   }
   controls.update();
@@ -270,7 +270,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-/* ── 캡처 / 내보내기 ─────────────────────────────── */
+/* ── capture / export ─────────────────────────────── */
 function snapshot({ maxWidth = 0, mime = 'image/png', quality = 0.92 } = {}) {
   renderer.render(scene, camera);
   const src = renderer.domElement;
@@ -287,19 +287,19 @@ function snapshot({ maxWidth = 0, mime = 'image/png', quality = 0.92 } = {}) {
 }
 
 function exportGLB() {
-  if (!current) { send({ type: 'error', message: '내보낼 모델이 없습니다.' }); return; }
+  if (!current) { send({ type: 'error', message: 'There is no model to export.' }); return; }
   new GLTFExporter().parse(
     current,
     (result) => {
       const buf = result instanceof ArrayBuffer ? result : new TextEncoder().encode(JSON.stringify(result)).buffer;
       send({ type: 'glb', buffer: buf }, [buf]);
     },
-    (err) => send({ type: 'error', message: 'GLB 내보내기 실패: ' + formatError(err) }),
+    (err) => send({ type: 'error', message: 'GLB export failed: ' + formatError(err) }),
     { binary: true, onlyVisible: true }
   );
 }
 
-/* ── 부모와의 메시지 프로토콜 ────────────────────── */
+/* ── message protocol with the parent ─────────────── */
 addEventListener('message', (e) => {
   const msg = e.data;
   if (!msg || typeof msg !== 'object') return;

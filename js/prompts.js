@@ -1,4 +1,4 @@
-/** AI에게 보낼 시스템 프롬프트 / 사용자 프롬프트 조립 */
+/** System and user prompts sent to the model */
 
 export const THREE_VERSION = '0.169.0';
 
@@ -46,7 +46,7 @@ const DETAIL_TEXT = {
   rich: 'Go for a detailed hero piece — layered forms, small props, careful material variation (still under the performance budget).',
 };
 
-/** 최초 생성 요청 문장 */
+/** First-shot generation request */
 export function buildUserPrompt({ prompt, style, detail, animate, hasImages }) {
   const lines = [];
   lines.push('Create a Three.js 3D model of:');
@@ -65,7 +65,7 @@ export function buildUserPrompt({ prompt, style, detail, animate, hasImages }) {
   return lines.join('\n');
 }
 
-/** 이어서 수정 요청 문장 */
+/** Follow-up refinement request */
 export function buildRefinePrompt(instruction) {
   return [
     'Update the previous model with this change:',
@@ -75,7 +75,7 @@ export function buildRefinePrompt(instruction) {
   ].join('\n');
 }
 
-/** 실행 오류 자동 수정 요청 문장 */
+/** Auto-repair request after a runtime error */
 export function buildFixPrompt(errorMessage) {
   return [
     'The code you produced failed at runtime with this error:',
@@ -86,7 +86,7 @@ export function buildFixPrompt(errorMessage) {
   ].join('\n');
 }
 
-/** 응답에서 코드 블록만 추출 */
+/** Pull the code block out of the reply */
 export function extractCode(reply) {
   const fence = /```(?:javascript|js|jsx|typescript|ts)?\s*\n([\s\S]*?)```/gi;
   const blocks = [];
@@ -97,7 +97,7 @@ export function extractCode(reply) {
     : reply.replace(/^[\s\S]*?(?=function\s+createModel)/, '');
   code = code.trim();
   if (!/function\s+createModel/.test(code)) {
-    throw new Error('응답에서 createModel() 함수를 찾지 못했습니다. 다른 모델을 사용하거나 다시 시도해 주세요.');
+    throw new Error('No createModel() function found in the reply. Try again, or switch to a stronger model.');
   }
   return code;
 }

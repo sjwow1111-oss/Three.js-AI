@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * 개발용 정적 서버 + 선택적 API 프록시 (외부 의존성 없음).
+ * Dev static server with an optional API proxy (no dependencies).
  *
  *   node server/serve.mjs            → http://localhost:5173
  *   PORT=8080 node server/serve.mjs
  *
- * /api/proxy?url=<인코딩된 대상 URL> 로 들어온 요청은 대상 AI 엔드포인트로 그대로 중계한다.
- * CORS를 허용하지 않는 엔드포인트를 브라우저에서 쓰기 위한 통로이며,
- * API 키는 요청 헤더로 지나갈 뿐 서버에 저장되지 않는다.
+ * Requests to /api/proxy?url=<encoded target URL> are relayed as-is to that AI
+ * endpoint. It exists so browsers can reach endpoints that do not allow CORS;
+ * the API key only passes through in the request headers and is never stored.
  */
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
@@ -32,7 +32,7 @@ const MIME = {
   '.map': 'application/json',
 };
 
-// 프록시가 대상 서버로 전달하는 헤더 (인증 관련만 선별)
+// headers the proxy forwards upstream (auth-related only)
 const FORWARD_HEADERS = [
   'authorization', 'x-api-key', 'anthropic-version', 'anthropic-beta',
   'content-type', 'accept', 'openai-organization', 'openai-project',
@@ -45,11 +45,11 @@ async function proxy(req, res, targetUrl) {
     target = new URL(targetUrl);
   } catch {
     res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end('잘못된 url 파라미터입니다.');
+    res.end('Invalid url parameter.');
     return;
   }
   if (!/^https?:$/.test(target.protocol)) {
-    res.writeHead(400).end('http/https URL만 중계할 수 있습니다.');
+    res.writeHead(400).end('Only http/https URLs can be relayed.');
     return;
   }
 
@@ -72,7 +72,7 @@ async function proxy(req, res, targetUrl) {
     });
   } catch (err) {
     res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ error: { message: '대상 서버에 연결하지 못했습니다: ' + err.message } }));
+    res.end(JSON.stringify({ error: { message: 'Could not reach the target server: ' + err.message } }));
     return;
   }
 
@@ -90,7 +90,7 @@ async function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   if (rel.endsWith('/')) rel += 'index.html';
   const file = join(ROOT, normalize(rel).replace(/^(\.\.[/\\])+/, ''));
-  if (!file.startsWith(ROOT)) { res.writeHead(403).end('금지됨'); return; }
+  if (!file.startsWith(ROOT)) { res.writeHead(403).end('Forbidden'); return; }
 
   try {
     const info = await stat(file);
@@ -99,13 +99,13 @@ async function serveStatic(req, res, pathname) {
       'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
       'content-length': info.size,
       'cache-control': 'no-cache',
-      // 샌드박스 iframe은 opaque origin이라 로컬 three.js를 쓰려면 CORS 허용이 필요하다
+      // the sandbox iframe is an opaque origin, so serving three.js locally needs CORS
       'access-control-allow-origin': '*',
     });
     createReadStream(file).pipe(res);
   } catch {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end('404 · 파일을 찾을 수 없습니다: ' + rel);
+    res.end('404 · Not found: ' + rel);
   }
 }
 
@@ -129,5 +129,5 @@ http.createServer(async (req, res) => {
   await serveStatic(req, res, url.pathname === '/' ? '/index.html' : url.pathname);
 }).listen(PORT, () => {
   console.log(`▶ Three.js AI Studio  →  http://localhost:${PORT}`);
-  console.log(`  프록시 엔드포인트    →  http://localhost:${PORT}/api/proxy?url=...`);
+  console.log(`  proxy endpoint      →  http://localhost:${PORT}/api/proxy?url=...`);
 });
