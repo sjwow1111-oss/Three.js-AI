@@ -1,0 +1,13 @@
+{
+  "name": "threejs-ai-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenAI/Anthropic 호환 엔드포인트를 연결해 프롬프트와 사진으로 Three.js 3D 모델을 생성하고 감상하는 웹 스튜디오",
+  "type": "module",
+  "scripts": {
+    "start": "node server/serve.mjs",
+    "dev": "node server/serve.mjs"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}

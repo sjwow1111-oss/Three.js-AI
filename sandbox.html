@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>3D 미리보기 샌드박스</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0e1016}
+  canvas{display:block;width:100%;height:100%}
+  #hud{position:fixed;left:10px;bottom:8px;font:11px ui-monospace,Menlo,Consolas,monospace;color:#66708a;pointer-events:none}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hud"></div>
+<script type="module">
+/**
+ * 격리된 샌드박스 뷰어.
+ * 부모(스튜디오)와는 postMessage로만 통신하며, AI가 생성한 코드는 여기에서만 실행된다.
+ * iframe에 allow-same-origin이 없으므로 이 문서는 opaque origin이고,
+ * 부모 페이지의 DOM·스토리지·API 키에 접근할 수 없다.
+ */
+const send = (msg, transfer) => parent.postMessage(msg, '*', transfer || []);
+const hud = document.getElementById('hud');
+
+// three.js는 importmap을 통해 CDN에서 가져온다. 실패하면 부모에게 알려
+// 무한 로딩 대신 원인을 볼 수 있게 한다.
+let THREE, OrbitControls, GLTFExporter, RoomEnvironment;
+try {
+  THREE = await import('three');
+  ({ OrbitControls } = await import('three/addons/controls/OrbitControls.js'));
+  ({ GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js'));
+  ({ RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js'));
+} catch (err) {
+  const why = (err && err.message) || String(err);
+  hud.textContent = 'three.js 로드 실패';
+  send({ type: 'boot-error', message: 'three.js를 CDN에서 불러오지 못했습니다.\n' + why +
+    '\n\n인터넷 연결 또는 방화벽(unpkg.com 접근)을 확인해 주세요.' });
+  throw err;
+}
+
+/* ── 기본 씬 구성 ─────────────────────────────────── */
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+} catch (err) {
+  hud.textContent = 'WebGL 사용 불가';
+  send({ type: 'boot-error', message: '이 브라우저/기기에서 WebGL을 초기화하지 못했습니다.\n' + ((err && err.message) || err) });
+  throw err;
+}
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const defaultBackground = new THREE.Color(0x0e1016);
+scene.background = defaultBackground;
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.05, 2000);
+camera.position.set(9, 6.5, 11);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.minDistance = 0.4;
+controls.maxDistance = 400;
+
+// 조명 (호스트 제공)
+const hemi = new THREE.HemisphereLight(0xdfe9ff, 0x2b3040, 0.65);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(8, 13, 7);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.bias = -0.0006;
+key.shadow.normalBias = 0.02;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x8fb6ff, 0.85);
+rim.position.set(-9, 5, -8);
+scene.add(rim);
+
+// 그림자 받이 바닥 + 그리드
+const shadowCatcher = new THREE.Mesh(
+  new THREE.PlaneGeometry(400, 400),
+  new THREE.ShadowMaterial({ opacity: 0.32 })
+);
+shadowCatcher.rotation.x = -Math.PI / 2;
+shadowCatcher.receiveShadow = true;
+scene.add(shadowCatcher);
+
+const grid = new THREE.GridHelper(40, 40, 0x39415a, 0x222838);
+grid.material.transparent = true;
+grid.material.opacity = 0.55;
+grid.visible = true;
+scene.add(grid);
+
+/* ── 상태 ────────────────────────────────────────── */
+let current = null;      // 생성된 THREE.Object3D
+let updateFn = null;     // 사용자 코드의 update()
+let autoRotate = false;
+let wireframe = false;
+let updateFailed = false;
+const clock = new THREE.Clock();
+
+function disposeObject(obj) {
+  obj.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of mats) {
+      for (const k of Object.keys(m)) {
+        const v = m[k];
+        if (v && v.isTexture) v.dispose();
+      }
+      m.dispose();
+    }
+  });
+}
+
+function clearModel() {
+  if (current) { scene.remove(current); disposeObject(current); current = null; }
+  updateFn = null;
+  updateFailed = false;
+  scene.background = defaultBackground;
+  scene.fog = null;
+}
+
+/** 모델 크기에 맞춰 카메라·그림자·그리드 배치 */
+function frameObject(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  if (box.isEmpty() || !isFinite(box.min.x)) return null;
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.length() * 0.5, 0.5);
+
+  controls.target.copy(center);
+  const dir = new THREE.Vector3(1, 0.62, 1.15).normalize();
+  camera.position.copy(center).addScaledVector(dir, radius * 2.6);
+  camera.near = Math.max(radius / 200, 0.01);
+  camera.far = radius * 200;
+  camera.updateProjectionMatrix();
+  controls.update();
+
+  const d = Math.max(radius * 2.2, 6);
+  key.position.copy(center).add(new THREE.Vector3(d * 0.7, d * 1.15, d * 0.6));
+  key.target.position.copy(center);
+  key.target.updateMatrixWorld();
+  scene.add(key.target);
+  const cam = key.shadow.camera;
+  cam.left = -d; cam.right = d; cam.top = d; cam.bottom = -d;
+  cam.near = 0.1; cam.far = d * 6;
+  cam.updateProjectionMatrix();
+
+  shadowCatcher.position.y = Math.min(box.min.y, 0);
+  grid.position.y = shadowCatcher.position.y + 0.001;
+  const gridSize = Math.max(Math.ceil(radius * 4), 10);
+  grid.geometry.dispose();
+  const ng = new THREE.GridHelper(gridSize, Math.min(gridSize, 60), 0x39415a, 0x222838);
+  grid.geometry = ng.geometry;
+  ng.material.dispose();
+
+  return { size, center, radius };
+}
+
+function countStats(obj) {
+  let meshes = 0, tris = 0;
+  obj.traverse((o) => {
+    if (!o.isMesh || !o.geometry) return;
+    meshes++;
+    const g = o.geometry;
+    const n = g.index ? g.index.count : (g.attributes.position ? g.attributes.position.count : 0);
+    tris += Math.floor(n / 3) * (o.isInstancedMesh ? o.count : 1);
+  });
+  return { meshes, triangles: tris };
+}
+
+function applyWireframe(on) {
+  if (!current) return;
+  current.traverse((o) => {
+    const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of mats) if ('wireframe' in m) m.wireframe = on;
+  });
+}
+
+/* ── AI 코드 실행 ────────────────────────────────── */
+function run(code) {
+  clearModel();
+  const started = performance.now();
+  try {
+    const factory = new Function(
+      'THREE', 'ctx',
+      '"use strict";\n' + code +
+      '\n;return {' +
+      ' createModel: typeof createModel === "function" ? createModel : null,' +
+      ' update: typeof update === "function" ? update : null };'
+    );
+    const ctx = { scene, camera, renderer };
+    const api = factory(THREE, ctx);
+    if (!api || typeof api.createModel !== 'function') {
+      throw new Error('createModel(THREE, ctx) 함수가 정의되지 않았습니다.');
+    }
+    const root = api.createModel(THREE, ctx);
+    if (!root || !root.isObject3D) {
+      throw new Error('createModel()이 THREE.Object3D를 반환하지 않았습니다.');
+    }
+    current = root;
+    updateFn = typeof api.update === 'function' ? api.update : null;
+    scene.add(root);
+
+    const framed = frameObject(root) || { radius: 5 };
+    applyWireframe(wireframe);
+
+    // 첫 프레임을 즉시 렌더해 런타임 오류를 조기에 잡는다
+    renderer.render(scene, camera);
+    if (updateFn) updateFn(current, 0, 0);
+
+    const stats = countStats(root);
+    hud.textContent = stats.meshes + ' meshes · ' + stats.triangles.toLocaleString() + ' tris';
+    send({
+      type: 'ok',
+      stats: { ...stats, ms: Math.round(performance.now() - started), animated: !!updateFn },
+    });
+  } catch (err) {
+    clearModel();
+    hud.textContent = '';
+    send({ type: 'error', message: formatError(err) });
+  }
+}
+
+function formatError(err) {
+  const msg = (err && (err.message || String(err))) || '알 수 없는 오류';
+  const stack = err && err.stack ? String(err.stack).split('\n').slice(0, 4).join('\n') : '';
+  return stack && !stack.includes(msg) ? msg + '\n' + stack : (stack || msg);
+}
+
+/* ── 렌더 루프 ───────────────────────────────────── */
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const t = clock.getElapsedTime();
+  if (current && autoRotate) current.rotation.y += dt * 0.35;
+  if (updateFn && current && !updateFailed) {
+    try { updateFn(current, t, dt); }
+    catch (err) {
+      updateFailed = true;
+      send({ type: 'error', message: 'update() 실행 중 오류\n' + formatError(err) });
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+tick();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ── 캡처 / 내보내기 ─────────────────────────────── */
+function snapshot({ maxWidth = 0, mime = 'image/png', quality = 0.92 } = {}) {
+  renderer.render(scene, camera);
+  const src = renderer.domElement;
+  if (!maxWidth || src.width <= maxWidth) return src.toDataURL(mime, quality);
+  const c = document.createElement('canvas');
+  const scale = maxWidth / src.width;
+  c.width = Math.round(src.width * scale);
+  c.height = Math.round(src.height * scale);
+  const g = c.getContext('2d');
+  g.fillStyle = '#0e1016';
+  g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(src, 0, 0, c.width, c.height);
+  return c.toDataURL(mime, quality);
+}
+
+function exportGLB() {
+  if (!current) { send({ type: 'error', message: '내보낼 모델이 없습니다.' }); return; }
+  new GLTFExporter().parse(
+    current,
+    (result) => {
+      const buf = result instanceof ArrayBuffer ? result : new TextEncoder().encode(JSON.stringify(result)).buffer;
+      send({ type: 'glb', buffer: buf }, [buf]);
+    },
+    (err) => send({ type: 'error', message: 'GLB 내보내기 실패: ' + formatError(err) }),
+    { binary: true, onlyVisible: true }
+  );
+}
+
+/* ── 부모와의 메시지 프로토콜 ────────────────────── */
+addEventListener('message', (e) => {
+  const msg = e.data;
+  if (!msg || typeof msg !== 'object') return;
+  try {
+    switch (msg.type) {
+      case 'run':
+        run(String(msg.code || ''));
+        break;
+      case 'clear':
+        clearModel(); hud.textContent = '';
+        break;
+      case 'options':
+        if ('autoRotate' in msg) autoRotate = !!msg.autoRotate;
+        if ('grid' in msg) grid.visible = !!msg.grid;
+        if ('wireframe' in msg) { wireframe = !!msg.wireframe; applyWireframe(wireframe); }
+        break;
+      case 'shot':
+        send({ type: 'shot', dataUrl: snapshot({ mime: 'image/png' }) });
+        break;
+      case 'thumb':
+        send({ type: 'thumb', dataUrl: snapshot({ maxWidth: 320, mime: 'image/jpeg', quality: 0.72 }) });
+        break;
+      case 'export':
+        exportGLB();
+        break;
+    }
+  } catch (err) {
+    send({ type: 'error', message: formatError(err) });
+  }
+});
+
+send({ type: 'ready' });
+</script>
+</body>
+</html>
